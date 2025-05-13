@@ -1,54 +1,62 @@
-% Entry point: start from the initial room, collect any key there,
-% then run BFS and reverse the resulting move list.
+%%%%%%%%%%%%%%%%%%%%%%
+% search/search.pl
+%%%%%%%%%%%%%%%%%%%%%%
+
+% Entry point: start at the initial room (picking up any key there),
+% do a BFS on states state(Room,Keys,RevPath), then reverse the RevPath.
 search(Actions) :-
     initial(Start),
-    update_keys(Start, [], Keys0),
-    bfs([state(Start, Keys0, [])], [room_keys(Start, Keys0)], RevActions),
+    update_keys(Start, [], Keys0),          % pick up key at Start (no action)
+    bfs([state(Start,Keys0,[])],             % initial queue
+        [room_keys(Start,Keys0)],            % visited set
+        RevActions),
     reverse(RevActions, Actions).
 
-% bfs(+Queue, +Visited, -ActionsRev)
-%   Queue holds states state(Room,Keys,PathRev). We succeed when
-%   the front state is at the treasure; otherwise expand neighbors.
-bfs([state(Room, _, PathRev)|_], _, PathRev) :-
+% Succeed when the front of the queue is at the treasure.
+bfs([state(Room,_,PathRev)|_], _, PathRev) :-
     treasure(Room), !.
-bfs([state(Room, Keys, PathRev)|Rest], Visited, ActionsRev) :-
+
+% Otherwise expand the front state:
+bfs([state(Room,Keys,PathRev)|Rest], Visited, ActionsRev) :-
     findall(
-      state(Next, NextKeys, [move(Room,Next)|PathRev]),
-      ( neighbor(Room, Keys, Next),
-        update_keys(Next, Keys, NextKeys),
-        \+ member(room_keys(Next, NextKeys), Visited)
-      ),
-      NewStates
+       state(Next, NextKeys, ActsRev),
+       edge_state(Room, Keys, PathRev, Next, NextKeys, ActsRev),
+       NewStates
     ),
     add_states(NewStates, Visited, Visited2),
     append(Rest, NewStates, Queue2),
     bfs(Queue2, Visited2, ActionsRev).
 
-% add_states(+States, +Visited, -VisitedOut)
-%   Add each state’s (Room,Keys) pair into the visited list.
+% Build one successor state via either an unlocked or locked door.
+edge_state(Room, Keys, PathRev, Next, NextKeys, NewPathRev) :-
+    % 1) Unlocked door move
+    ( door(Room, Next)
+    ; door(Next, Room)
+    ),
+    update_keys(Next, Keys, NextKeys),
+    % record only a move/2
+    NewPathRev = [move(Room,Next)|PathRev].
+
+edge_state(Room, Keys, PathRev, Next, NextKeys, NewPathRev) :-
+    % 2) Locked door: must have the key, and record unlock(Color)+move
+    ( locked_door(Room, Next, Color)
+    ; locked_door(Next, Room, Color)
+    ),
+    member(Color, Keys),
+    update_keys(Next, Keys, NextKeys),
+    NewPathRev = [move(Room,Next), unlock(Color) | PathRev].
+
+
+% Add each new (Room,Keys) combination into the visited set.
 add_states([], Visited, Visited).
 add_states([state(R,K,_)|T], Visited, [room_keys(R,K)|V2]) :-
     add_states(T, Visited, V2).
 
-% neighbor(+Room, +Keys, -Next)
-%   You can move through any undirected door; for locked doors,
-%   you must already carry the matching key.
-neighbor(Room, _, Next) :-
-    door(Room, Next).
-neighbor(Room, _, Next) :-
-    door(Next, Room).
-neighbor(Room, Keys, Next) :-
-    locked_door(Room, Next, Color),
-    member(Color, Keys).
-neighbor(Room, Keys, Next) :-
-    locked_door(Next, Room, Color),
-    member(Color, Keys).
 
-% update_keys(+Room, +OldKeys, -NewKeys)
-%   If Room contains a key you don’t already have, pick it up.
+% If there's a key in the room you don't yet have, pick it up
+% (no action is recorded for pickup).
 update_keys(Room, OldKeys, NewKeys) :-
     key(Room, Color),
     \+ member(Color, OldKeys),
     sort([Color|OldKeys], NewKeys), !.
 update_keys(_, Keys, Keys).
-
